@@ -594,8 +594,6 @@ class RiskClientApp:
         self._draw_prompt_and_buttons(snapshot, sidebar.x + 12, cursor_y, sidebar.width - 24)
         cursor_y += 170
         self._draw_hand(snapshot, sidebar.x + 12, cursor_y, sidebar.width - 24)
-        cursor_y += 210
-        self._draw_log(snapshot, sidebar.x + 12, cursor_y, sidebar.width - 24, sidebar.bottom - cursor_y - 12)
 
     def _draw_players_block(self, snapshot: dict[str, object], x: int, y: int, width: int) -> int:
         row_height = 80
@@ -632,7 +630,10 @@ class RiskClientApp:
         color = PLAYER_COLORS.get(str(player.get("color")), SUBTLE) if player else SUBTLE
 
         player_box = pygame.Rect(box.x + 10, box.y + 10, box.width - 20, 96)
-        legend_box = pygame.Rect(box.x + 10, player_box.bottom + 10, box.width - 20, box.bottom - player_box.bottom - 20)
+        legend_height = 310
+        legend_box = pygame.Rect(box.x + 10, player_box.bottom + 10, box.width - 20, legend_height)
+        log_box_y = legend_box.bottom + 10
+        log_height = box.bottom - log_box_y - 10
         self._draw_panel(player_box, PANEL_ALT)
         self._draw_panel(legend_box, PANEL_ALT)
 
@@ -651,6 +652,7 @@ class RiskClientApp:
             label = f"{CONTINENT_LABELS.get(continent, continent)} (+{CONTINENT_BONUSES[continent]})"
             for line_index, line in enumerate(wrap_text(label, self.font_tiny, row.width - 30, max_lines=2)):
                 self.screen.blit(self.font_tiny.render(line, True, TEXT), (row.x + 24, row.y + 4 + line_index * 12))
+        self._draw_log(snapshot, box.x + 10, log_box_y, box.width - 20, log_height)
 
     def _draw_mission_block(self, snapshot: dict[str, object], x: int, y: int, width: int) -> None:
         box = pygame.Rect(x, y, width, 100)
@@ -837,7 +839,7 @@ class RiskClientApp:
     def _draw_log(self, snapshot: dict[str, object], x: int, y: int, width: int, height: int) -> None:
         box = pygame.Rect(x, y, width, max(60, height))
         self._draw_panel(box, PANEL_ALT)
-        self._draw_section_header("Batalha / Registro", x + 10, y + 8, width - 20)
+        self._draw_section_header("Histórico de ações", x + 10, y + 8, width - 20)
         battle = snapshot.get("last_battle") or {}
         cursor_y = y + 38
         if isinstance(battle, dict) and battle:

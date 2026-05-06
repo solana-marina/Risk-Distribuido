@@ -423,9 +423,3 @@ leave_game(player_id: str)
   "status_message": "JogadorA completou a missão secreta."
 }
 ```
-
-#### 2.4. Diagrama de Sequência (Fluxo de Mensagens)
-
-O diagrama abaixo ilustra a troca simplificada de mensagens desde a conexão até o fim do jogo.
-
-![Diagrama de Sequência](diagrama.png)
