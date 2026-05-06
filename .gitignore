@@ -2,10 +2,10 @@
 /tests
 /tmp_overlay.png
 /tmp_overlay_brazil_zoom.png
-risk_dist\tools
-risk_dist\server\__pycache__
-risk_dist\client\__pycache__
-risk_dist\__pycache__
-risk_dist\partida_completa.mp4
-risk_dist\shared\__pycache__
-risk_dist\tools
+/risk_dist\tools
+/risk_dist\server\__pycache__
+/risk_dist\client\__pycache__
+/risk_dist\__pycache__
+/risk_dist\partida_completa.mp4
+/risk_dist\shared\__pycache__
+/risk_dist\tools
