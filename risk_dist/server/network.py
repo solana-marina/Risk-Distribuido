@@ -24,8 +24,12 @@ Paralelo com Java RMI:
 
 from __future__ import annotations
 
+import os
+import socket
 from socketserver import ThreadingMixIn
 from xmlrpc.server import SimpleXMLRPCRequestHandler, SimpleXMLRPCServer
+
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 from risk_dist.server.game import RiskGame
 from risk_dist.shared.constants import DEFAULT_PORT
@@ -162,4 +166,32 @@ def serve_forever(host: str = "0.0.0.0", port: int = DEFAULT_PORT) -> None:
     """
     with create_rpc_server(host, port) as server:
         print(f"Servidor de Risk ouvindo em {host}:{port}")
+        if host == "0.0.0.0":
+            print(f"No mesmo computador, conecte o cliente em: 127.0.0.1:{port}")
+            addresses = local_ipv4_addresses()
+            if addresses:
+                print("Em outro computador na mesma rede, use um destes IPs do servidor:")
+                for address in addresses:
+                    print(f"  {address}:{port}")
+            else:
+                print("Em outro computador, descubra o IPv4 do servidor com: ipconfig")
+            print("Observação: 0.0.0.0 é endereço de escuta do servidor; o cliente não deve usar esse endereço.")
         server.serve_forever()
+
+
+def local_ipv4_addresses() -> list[str]:
+    """Lista endereços IPv4 locais prováveis para os clientes da LAN.
+
+    Esta função existe só para orientar quem vai conectar os clientes. O
+    servidor continua escutando em ``0.0.0.0``; os clientes precisam usar um IP
+    real da máquina, como ``192.168.x.x`` ou ``10.x.x.x``.
+    """
+    addresses: set[str] = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+    return sorted(addresses)

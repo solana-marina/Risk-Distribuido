@@ -122,10 +122,22 @@ class RpcGameClient:
         - O cliente guarda apenas uma referência lógica para essa sessão.
         """
         self.proxy = ServerProxy(self.endpoint, allow_none=True)
-        result = self.proxy.join_game(name)
-        if result.get("ok"):
-            self.player_id = str(result["player_id"])
-        return result
+        try:
+            result = self.proxy.join_game(name)
+            if result.get("ok"):
+                self.player_id = str(result["player_id"])
+            return result
+        except (Fault, ProtocolError, OSError) as exc:
+            self.proxy = None
+            if "0.0.0.0" in self.endpoint:
+                return {
+                    "ok": False,
+                    "error": (
+                        "No cliente, não use 0.0.0.0. Use 127.0.0.1 no mesmo computador "
+                        "ou o IPv4 da máquina do servidor em outro computador."
+                    ),
+                }
+            return {"ok": False, "error": f"Não foi possível conectar ao servidor: {exc}"}
 
     def choose_color(self, color: str) -> dict[str, object]:
         """Invoca remotamente a escolha de cor no lobby."""

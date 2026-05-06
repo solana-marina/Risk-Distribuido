@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from risk_dist.server.network import serve_forever
 from risk_dist.shared.constants import DEFAULT_PORT

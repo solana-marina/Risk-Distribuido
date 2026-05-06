@@ -51,6 +51,87 @@ ACCENT = (79, 187, 255)
 ERROR = (224, 91, 91)
 SUCCESS = (93, 204, 123)
 
+CARD_SYMBOL_LABELS = {
+    "infantry": "Infantaria",
+    "cavalry": "Cavalaria",
+    "artillery": "Artilharia",
+    "wild": "Curinga",
+}
+
+RULES_PAGES = (
+    (
+        "Objetivo",
+        (
+            "Vença sendo o primeiro jogador a cumprir sua missão secreta.",
+            "A missão fica visível apenas para o próprio jogador.",
+            "O tabuleiro fica visível para todos, mas cartas e missão são informações privadas do dono.",
+        ),
+    ),
+    (
+        "Preparação",
+        (
+            "Cada jogador escolhe uma cor e recebe tropas iniciais.",
+            "Infantaria vale 1 tropa, cavalaria vale 5 tropas e artilharia vale 10 tropas na representação visual.",
+            "As cartas de território são distribuídas sem os curingas; cada território começa com 1 infantaria.",
+            "Depois, os jogadores posicionam tropas extras em rodízio nos próprios territórios.",
+            "Quando a preparação termina, os curingas voltam ao baralho de território.",
+        ),
+    ),
+    (
+        "Turno e Reforços",
+        (
+            "No início do turno, receba o número de territórios dividido por 3, sempre com mínimo de 3 tropas.",
+            "Dominar um continente inteiro concede tropas extras conforme a legenda.",
+            "Distribua todos os reforços antes de atacar.",
+            "Depois dos reforços vem a fase de ataque; você pode atacar várias vezes na mesma fase.",
+            "Quando não for sua vez, aguarde a ação do outro jogador.",
+        ),
+    ),
+    (
+        "Cartas e Curingas",
+        (
+            "Você recebe 1 carta no fim do turno se conquistou pelo menos 1 território naquele turno.",
+            "Mesmo conquistando vários territórios, o limite é 1 carta por turno.",
+            "Cartas de território têm símbolo de infantaria, cavalaria ou artilharia.",
+            "A carta curinga não representa território; ela pode substituir qualquer símbolo em uma troca.",
+            "O curinga não concede bônus de +2 tropas em território específico.",
+            "Trocas válidas são 3 símbolos iguais, 1 de cada símbolo ou combinações usando curingas.",
+            "O valor das trocas aumenta globalmente: 4, 6, 8, 10, 12, 15 e depois soma +5.",
+        ),
+    ),
+    (
+        "Ataque e Dados",
+        (
+            "Você pode atacar várias vezes na mesma fase de ataque.",
+            "Para atacar, selecione primeiro um território seu com pelo menos 2 tropas.",
+            "Depois selecione um território inimigo adjacente ou ligado por linha tracejada.",
+            "O atacante usa até 3 dados, limitado pelas tropas disponíveis; o defensor usa 1 ou 2 dados.",
+            "Os maiores dados são comparados. Empate favorece o defensor.",
+            "Dados vermelhos são do atacante; dados azuis são do defensor.",
+        ),
+    ),
+    (
+        "Conquista",
+        (
+            "Se o defensor perder a última tropa, o território é conquistado.",
+            "O atacante deve mover tropas para o território conquistado.",
+            "O número mínimo de tropas movidas é o número de dados usados no ataque final.",
+            "Após a conquista, você ainda pode continuar atacando na mesma fase.",
+        ),
+    ),
+    (
+        "Manobra e Vitória",
+        (
+            "Após encerrar os ataques, você pode fazer uma única manobra.",
+            "A manobra move tropas entre dois territórios seus conectados por caminho próprio.",
+            "O território de origem precisa ficar com pelo menos 1 tropa.",
+            "Ao eliminar um oponente, você recebe todas as cartas dele.",
+            "Se ficar com mais de 4 cartas, deve realizar trocas imediatas.",
+            "A partida termina assim que uma missão secreta for cumprida.",
+        ),
+    ),
+)
+
 
 @dataclass(frozen=True)
 class ConfiguracaoCliente:
@@ -153,6 +234,8 @@ class RiskClientApp:
         self.selected_cards: set[str] = set()
         self.selected_territories: list[str] = []
         self.move_count = 0
+        self.rules_visible = False
+        self.rules_page = 0
         self._last_prompt_signature: tuple[str, int, int] | None = None
         self.board_cache: dict[tuple[int, int], pygame.Surface] = {}
         if self.configuracao.autoconectar:
@@ -192,6 +275,15 @@ class RiskClientApp:
                     if button.enabled and button.rect.collidepoint(mouse_pos):
                         self._activate(button.action)
         elif self.state == "game":
+            if self.rules_visible:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.rules_visible = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and mouse_pos:
+                    for button in reversed(self.game_buttons):
+                        if button.action[0] in {"close_rules", "rules_page"} and button.enabled and button.rect.collidepoint(mouse_pos):
+                            self._activate(button.action)
+                            return
+                return
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and mouse_pos:
                 if self._handle_game_click(mouse_pos):
                     return
@@ -207,6 +299,12 @@ class RiskClientApp:
             self._host_game()
         elif kind == "join":
             self._connect_to_server(str(value or self.host_input.text))
+        elif kind == "show_rules":
+            self.rules_visible = True
+        elif kind == "close_rules":
+            self.rules_visible = False
+        elif kind == "rules_page":
+            self.rules_page = max(0, min(len(RULES_PAGES) - 1, self.rules_page + int(value or 0)))
         elif kind == "choose_color":
             assert self.client
             result = self.client.choose_color(str(value))
@@ -468,12 +566,16 @@ class RiskClientApp:
 
     def _draw_game(self) -> None:
         snapshot = self.snapshot or {}
+        self.game_buttons = []
         board_rect, scale = self._board_rect()
         scaled_board = self._scaled_board_image(board_rect.size)
         self.screen.blit(scaled_board, board_rect.topleft)
         self._draw_board_overlays(board_rect, scale, snapshot)
         self._draw_left_sidebar(snapshot)
         self._draw_sidebar(snapshot, board_rect)
+        self._draw_board_action_bar(snapshot, board_rect)
+        if self.rules_visible:
+            self._draw_rules_modal()
 
     def _draw_sidebar(self, snapshot: dict[str, object], board_rect: pygame.Rect) -> None:
         sidebar = pygame.Rect(board_rect.right + PANEL_GAP, 20, RIGHT_SIDEBAR_WIDTH, WINDOW_SIZE[1] - 40)
@@ -571,21 +673,129 @@ class RiskClientApp:
     def _draw_prompt_and_buttons(self, snapshot: dict[str, object], x: int, y: int, width: int) -> None:
         box = pygame.Rect(x, y, width, 156)
         self._draw_panel(box, PANEL_ALT)
-        self._draw_section_header("Ações", x + 10, y + 8, width - 20)
-        self.game_buttons = []
+        self._draw_section_header("Orientação", x + 10, y + 8, width - 20)
         self._draw_message(x + 10, y + 38, width - 20, max_lines=2)
-        buttons = self._build_game_buttons(snapshot, x + 10, y + 78, width - 20)
-        self.game_buttons = buttons
-        for button in buttons:
-            button.draw(self.screen, self.font_small if button.rect.width < 90 else self.font)
+        for index, line in enumerate(wrap_text(self._phase_instruction(snapshot), self.font_tiny, width - 20, max_lines=3)):
+            self.screen.blit(self.font_tiny.render(line, True, SUBTLE), (x + 10, y + 74 + index * 14))
         prompt = snapshot.get("pending_prompt") or {}
         if isinstance(prompt, dict) and prompt.get("type") == "capture_move":
-            hint = self.font_small.render(f"Mover tropas: {self.move_count}", True, TEXT)
-            self.screen.blit(hint, (x + 10, y + 130))
+            hint = fit_text(f"Mover tropas: {self.move_count}", self.font_small, width - 132)
+            self.screen.blit(self.font_small.render(hint, True, TEXT), (x + 10, y + 118))
         elif self.selected_territories:
             label = "Selecionado: " + ", ".join(self._territory_name(snapshot, territory_id) for territory_id in self.selected_territories)
-            label = fit_text(label, self.font_small, width - 20)
-            self.screen.blit(self.font_small.render(label, True, SUBTLE), (x + 10, y + 130))
+            label = fit_text(label, self.font_small, width - 132)
+            self.screen.blit(self.font_small.render(label, True, SUBTLE), (x + 10, y + 118))
+        rules_button = Button(pygame.Rect(x + width - 108, y + 116, 98, 30), "Regras", ("show_rules", None))
+        self.game_buttons.append(rules_button)
+        rules_button.draw(self.screen, self.font_small)
+
+    def _draw_board_action_bar(self, snapshot: dict[str, object], board_rect: pygame.Rect) -> None:
+        bar = pygame.Rect(board_rect.x, board_rect.bottom + 8, board_rect.width, WINDOW_SIZE[1] - board_rect.bottom - 28)
+        self._draw_panel(bar, PANEL_ALT)
+        info_width = 392
+        hover_pos = self._virtual_mouse_pos()
+        hover = self._territory_at_pos(hover_pos) if hover_pos else None
+        if hover:
+            territory = self._territory(snapshot, hover)
+            info = f"{territory['display_name']} | tropas: {territory['troops']}"
+        else:
+            info = self._bottom_bar_instruction(snapshot)
+        for index, line in enumerate(wrap_text(info, self.font_small, info_width, max_lines=2)):
+            self.screen.blit(self.font_small.render(line, True, TEXT if index == 0 else SUBTLE), (bar.x + 12, bar.y + 10 + index * 17))
+
+        buttons = self._build_game_buttons(snapshot, bar.x + info_width + 24, bar.y + 12, bar.width - info_width - 36)
+        self.game_buttons.extend(buttons)
+        for button in buttons:
+            button.draw(self.screen, self.font_small)
+
+    def _phase_instruction(self, snapshot: dict[str, object]) -> str:
+        phase = str(snapshot.get("phase"))
+        prompt = snapshot.get("pending_prompt") or {}
+        me = str(snapshot.get("self_player_id"))
+        current = str(snapshot.get("current_player_id"))
+        if isinstance(prompt, dict) and prompt.get("type") == "defend":
+            return "Escolha com quantos dados defender. Empates favorecem o defensor."
+        if isinstance(prompt, dict) and prompt.get("type") == "capture_move":
+            return "Após conquistar, confirme quantas tropas vão ocupar o território."
+        if current and me != current and phase not in {"lobby", "game_over"}:
+            return f"Aguarde a ação de {self._player_name(snapshot, current)}."
+        if phase == "setup":
+            return "Clique em um território seu para posicionar 1 tropa de preparação."
+        if phase == "reinforcement":
+            return "Clique em territórios seus para distribuir todos os reforços."
+        if phase == "attack":
+            if me != current:
+                return "Aguarde o outro jogador atacar ou encerrar a fase."
+            return "Você pode fazer vários ataques nesta fase. Selecione origem e alvo; quando terminar, encerre o ataque."
+        if phase == "fortify":
+            return "Você pode fazer uma única manobra entre territórios seus conectados."
+        if phase == "game_over":
+            return "Partida encerrada. A missão vencedora foi cumprida."
+        return "Acompanhe a situação da partida e consulte as regras quando precisar."
+
+    def _bottom_bar_instruction(self, snapshot: dict[str, object]) -> str:
+        phase = str(snapshot.get("phase"))
+        me = str(snapshot.get("self_player_id"))
+        current = str(snapshot.get("current_player_id"))
+        if current and me != current and phase not in {"lobby", "game_over"}:
+            return f"Aguarde a ação de {self._player_name(snapshot, current)}. Você verá a atualização assim que o outro jogador agir."
+        if phase == "attack":
+            return "Ataques não são limitados a 1 por rodada. Continue atacando ou encerre a fase quando quiser parar."
+        if phase == "fortify":
+            return "Escolha dois territórios seus conectados para manobrar, ou encerre o turno."
+        if phase == "reinforcement":
+            return "Distribua reforços antes de atacar. Trocas de cartas aparecem aqui quando estiverem disponíveis."
+        if phase == "setup":
+            return "Preparação: posicione tropas extras nos seus territórios."
+        return "Passe o mouse sobre o mapa para ver o território e suas tropas."
+
+    def _draw_rules_modal(self) -> None:
+        overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        modal = pygame.Rect(210, 62, WINDOW_SIZE[0] - 420, WINDOW_SIZE[1] - 124)
+        self._draw_panel(modal, PANEL)
+        title_surface = self.font_big.render("Regras do Jogo", True, TEXT)
+        self.screen.blit(title_surface, (modal.x + 24, modal.y + 18))
+        subtitle = "Manual paginado para consultar durante a partida."
+        self.screen.blit(self.font_small.render(subtitle, True, SUBTLE), (modal.x + 24, modal.y + 54))
+
+        close_button = Button(pygame.Rect(modal.right - 120, modal.y + 20, 96, 34), "Fechar", ("close_rules", None))
+        self.game_buttons.append(close_button)
+        close_button.draw(self.screen, self.font_small)
+
+        self.rules_page = max(0, min(self.rules_page, len(RULES_PAGES) - 1))
+        page_title, items = RULES_PAGES[self.rules_page]
+        content = pygame.Rect(modal.x + 34, modal.y + 104, modal.width - 68, modal.height - 190)
+        self.screen.blit(self.font_big.render(page_title, True, TEXT), (content.x, content.y))
+        pygame.draw.line(self.screen, ACCENT, (content.x, content.y + 42), (content.x + 110, content.y + 42), 3)
+
+        cursor_y = content.y + 62
+        for item in items:
+            lines = wrap_text(item, self.font_small, content.width - 30, max_lines=4)
+            pygame.draw.circle(self.screen, ACCENT, (content.x + 7, cursor_y + 8), 4)
+            for line_index, line in enumerate(lines):
+                self.screen.blit(self.font_small.render(line, True, TEXT), (content.x + 24, cursor_y + line_index * 18))
+            cursor_y += len(lines) * 18 + 14
+
+        page_label = f"Página {self.rules_page + 1} de {len(RULES_PAGES)}"
+        self.screen.blit(self.font_small.render(page_label, True, SUBTLE), (modal.x + 34, modal.bottom - 54))
+        prev_button = Button(
+            pygame.Rect(modal.right - 310, modal.bottom - 62, 90, 36),
+            "Anterior",
+            ("rules_page", -1),
+            self.rules_page > 0,
+        )
+        next_button = Button(
+            pygame.Rect(modal.right - 208, modal.bottom - 62, 90, 36),
+            "Próxima",
+            ("rules_page", 1),
+            self.rules_page < len(RULES_PAGES) - 1,
+        )
+        self.game_buttons.extend([prev_button, next_button])
+        prev_button.draw(self.screen, self.font_small)
+        next_button.draw(self.screen, self.font_small)
 
     def _draw_hand(self, snapshot: dict[str, object], x: int, y: int, width: int) -> None:
         box = pygame.Rect(x, y, width, 196)
@@ -593,16 +803,31 @@ class RiskClientApp:
         self._draw_section_header("Suas Cartas", x + 10, y + 8, width - 20)
         self.card_rects.clear()
         hand = list(snapshot.get("your_hand", []))
+        if not hand:
+            empty_text = "Você ainda não tem cartas. Conquiste um território e encerre o turno para receber 1 carta."
+            for index, line in enumerate(wrap_text(empty_text, self.font_small, width - 20, max_lines=5)):
+                self.screen.blit(self.font_small.render(line, True, SUBTLE), (x + 10, y + 42 + index * 18))
         for index, card in enumerate(hand[:6]):
-            rect = pygame.Rect(x + 10, y + 36 + index * 24, width - 20, 20)
+            rect = pygame.Rect(x + 10, y + 36 + index * 24, width - 20, 22)
             self.card_rects[str(card["id"])] = rect
             selected = str(card["id"]) in self.selected_cards
-            pygame.draw.rect(self.screen, (246, 236, 198) if not selected else (255, 209, 102), rect, border_radius=8)
+            is_wild = str(card.get("kind")) == "wild"
+            fill = (224, 208, 255) if is_wild else (246, 236, 198)
+            if selected:
+                fill = (255, 209, 102)
+            pygame.draw.rect(self.screen, fill, rect, border_radius=8)
             pygame.draw.rect(self.screen, (80, 70, 50), rect, width=1, border_radius=8)
             territory_id = str(card.get("territory") or "wild")
             territory_name = self._territory_name(snapshot, territory_id)
-            text = fit_text(f"{symbol_glyph(str(card['symbol']))} {territory_name}", self.font_tiny, rect.width - 16)
-            self.screen.blit(self.font_tiny.render(text, True, (30, 30, 35)), (rect.x + 8, rect.y + 4))
+            symbol = str(card["symbol"])
+            glyph_rect = pygame.Rect(rect.x + 5, rect.y + 4, 18, 14)
+            pygame.draw.rect(self.screen, (42, 38, 52) if is_wild else (255, 255, 255), glyph_rect, border_radius=5)
+            glyph_color = (255, 255, 255) if is_wild else (30, 30, 35)
+            glyph_surface = self.font_tiny.render(symbol_glyph(symbol), True, glyph_color)
+            self.screen.blit(glyph_surface, glyph_surface.get_rect(center=glyph_rect.center))
+            symbol_label = CARD_SYMBOL_LABELS.get(symbol, symbol)
+            text = fit_text(f"{territory_name} | {symbol_label}", self.font_tiny, rect.width - 34)
+            self.screen.blit(self.font_tiny.render(text, True, (30, 30, 35)), (rect.x + 28, rect.y + 5))
         trade_sets = list(snapshot.get("your_trade_sets", []))
         mandatory = bool(snapshot.get("must_trade"))
         footer = "Troca obrigatória" if mandatory else f"Conjuntos de troca disponíveis: {len(trade_sets)}"
@@ -616,21 +841,73 @@ class RiskClientApp:
         battle = snapshot.get("last_battle") or {}
         cursor_y = y + 38
         if isinstance(battle, dict) and battle:
-            battle_line = (
-                f"{battle.get('attacker')} {battle.get('attacker_rolls')} "
-                f"contra {battle.get('defender')} {battle.get('defender_rolls')}"
-            )
-            battle_line = fit_text(battle_line, self.font_small, width - 20)
-            self.screen.blit(self.font_small.render(battle_line, True, TEXT), (x + 10, cursor_y))
-            cursor_y += 18
-        max_lines = max(3, (box.height - 42) // 18)
+            cursor_y = self._draw_battle_dice(battle, x + 10, cursor_y, width - 20)
+        max_lines = max(2, (box.bottom - cursor_y - 8) // 18)
         for line in list(snapshot.get("log", []))[-max_lines:]:
             rendered = self.font_small.render(fit_text(str(line), self.font_small, width - 20), True, SUBTLE)
             self.screen.blit(rendered, (x + 10, cursor_y))
             cursor_y += 18
 
+    def _draw_battle_dice(self, battle: dict[str, object], x: int, y: int, width: int) -> int:
+        title = fit_text(f"{battle.get('attacker')} atacou {battle.get('defender')}", self.font_small, width)
+        self.screen.blit(self.font_small.render(title, True, TEXT), (x, y))
+        y += 20
+        y = self._draw_dice_row("Ataque", list(battle.get("attacker_rolls", [])), (209, 70, 70), x, y, width)
+        y = self._draw_dice_row("Defesa", list(battle.get("defender_rolls", [])), (78, 137, 225), x, y, width)
+        losses = f"Perdas: atacante {battle.get('attacker_losses', 0)} | defensor {battle.get('defender_losses', 0)}"
+        self.screen.blit(self.font_tiny.render(fit_text(losses, self.font_tiny, width), True, SUBTLE), (x, y + 2))
+        return y + 20
+
+    def _draw_dice_row(
+        self,
+        label: str,
+        rolls: list[object],
+        color: tuple[int, int, int],
+        x: int,
+        y: int,
+        width: int,
+    ) -> int:
+        self.screen.blit(self.font_tiny.render(label, True, SUBTLE), (x, y + 4))
+        dice_x = x + 58
+        for roll in rolls[:3]:
+            if dice_x + 24 > x + width:
+                break
+            self._draw_die(pygame.Rect(dice_x, y, 22, 22), int(roll), color)
+            dice_x += 28
+        return y + 28
+
+    def _draw_die(self, rect: pygame.Rect, value: int, color: tuple[int, int, int]) -> None:
+        pygame.draw.rect(self.screen, color, rect, border_radius=5)
+        pygame.draw.rect(self.screen, (245, 245, 245), rect, width=1, border_radius=5)
+        pip_positions = {
+            1: [(0.5, 0.5)],
+            2: [(0.28, 0.28), (0.72, 0.72)],
+            3: [(0.28, 0.28), (0.5, 0.5), (0.72, 0.72)],
+            4: [(0.28, 0.28), (0.72, 0.28), (0.28, 0.72), (0.72, 0.72)],
+            5: [(0.28, 0.28), (0.72, 0.28), (0.5, 0.5), (0.28, 0.72), (0.72, 0.72)],
+            6: [(0.28, 0.24), (0.72, 0.24), (0.28, 0.5), (0.72, 0.5), (0.28, 0.76), (0.72, 0.76)],
+        }
+        for rel_x, rel_y in pip_positions.get(max(1, min(6, value)), []):
+            pygame.draw.circle(
+                self.screen,
+                (255, 255, 255),
+                (int(rect.x + rect.width * rel_x), int(rect.y + rect.height * rel_y)),
+                2,
+            )
+
     def _build_game_buttons(self, snapshot: dict[str, object], x: int, y: int, width: int) -> list[Button]:
         buttons: list[Button] = []
+        cursor_x = x
+
+        def add_button(label: str, button_width: int, action: tuple[str, object | None], enabled: bool = True) -> None:
+            nonlocal cursor_x
+            remaining_width = x + width - cursor_x
+            if remaining_width < 36:
+                return
+            actual_width = min(button_width, remaining_width)
+            buttons.append(Button(pygame.Rect(cursor_x, y, actual_width, 34), label, action, enabled))
+            cursor_x += actual_width + 10
+
         prompt = snapshot.get("pending_prompt") or {}
         phase = str(snapshot.get("phase"))
         me = str(snapshot.get("self_player_id"))
@@ -639,20 +916,20 @@ class RiskClientApp:
         if isinstance(prompt, dict) and prompt.get("type") == "defend":
             max_dice = int(prompt.get("max_defense_dice", 1))
             for index in range(1, max_dice + 1):
-                buttons.append(Button(pygame.Rect(x + (index - 1) * 110, y, 100, 36), f"Defender {index}", ("defend", index)))
+                add_button(f"Defender {index}", 118, ("defend", index))
             return buttons
         if isinstance(prompt, dict) and prompt.get("type") == "capture_move":
-            buttons.append(Button(pygame.Rect(x, y, 48, 36), "-", ("move_delta", -1)))
-            buttons.append(Button(pygame.Rect(x + 58, y, 48, 36), "+", ("move_delta", 1)))
-            buttons.append(Button(pygame.Rect(x + 120, y, width - 120, 36), "Mover Tropas", ("capture_move", None)))
+            add_button("-", 44, ("move_delta", -1))
+            add_button("+", 44, ("move_delta", 1))
+            add_button("Mover Tropas", 142, ("capture_move", None))
             return buttons
         if not is_my_turn:
             return buttons
         if phase == "reinforcement":
             if len(self.selected_cards) == 3:
-                buttons.append(Button(pygame.Rect(x, y, width, 36), "Trocar Selecionadas", ("trade_selected", None)))
+                add_button("Trocar Selecionadas", 190, ("trade_selected", None))
             elif snapshot.get("your_trade_sets"):
-                buttons.append(Button(pygame.Rect(x, y, width, 36), "Troca Automática", ("auto_trade", None)))
+                add_button("Troca Automática", 170, ("auto_trade", None))
             return buttons
         if phase == "attack":
             pair = self._selected_attack_pair(snapshot)
@@ -660,10 +937,9 @@ class RiskClientApp:
                 source = self._territory(snapshot, pair[0])
                 max_attack = min(3, int(source["troops"]) - 1)
                 for dice in range(1, max_attack + 1):
-                    buttons.append(Button(pygame.Rect(x + (dice - 1) * 92, y, 84, 36), f"Atacar {dice}", ("attack", dice)))
-            button_width = (width - 14) // 2
-            buttons.append(Button(pygame.Rect(x, y + 48, button_width, 36), "Encerrar Ataque", ("end_attack_phase", None)))
-            buttons.append(Button(pygame.Rect(x + button_width + 14, y + 48, button_width, 36), "Encerrar Turno", ("end_turn", None)))
+                    add_button(f"Atacar {dice}", 88, ("attack", dice))
+            add_button("Encerrar Ataque", 150, ("end_attack_phase", None))
+            add_button("Encerrar Turno", 142, ("end_turn", None))
             return buttons
         if phase == "fortify":
             pair = self._selected_fortify_pair(snapshot)
@@ -671,10 +947,10 @@ class RiskClientApp:
                 source = self._territory(snapshot, pair[0])
                 max_move = max(1, int(source["troops"]) - 1)
                 self.move_count = max(1, min(max_move, self.move_count or 1))
-                buttons.append(Button(pygame.Rect(x, y, 48, 36), "-", ("move_delta", -1)))
-                buttons.append(Button(pygame.Rect(x + 58, y, 48, 36), "+", ("move_delta", 1)))
-                buttons.append(Button(pygame.Rect(x + 120, y, width - 120, 36), "Manobrar", ("fortify", None)))
-            buttons.append(Button(pygame.Rect(x, y + 48, width, 36), "Encerrar Turno", ("end_turn", None)))
+                add_button("-", 44, ("move_delta", -1))
+                add_button("+", 44, ("move_delta", 1))
+                add_button("Manobrar", 124, ("fortify", None))
+            add_button("Encerrar Turno", 142, ("end_turn", None))
         return buttons
 
     def _handle_game_click(self, pos: tuple[int, int]) -> bool:
@@ -782,12 +1058,6 @@ class RiskClientApp:
             troop_text = self.font_small.render(str(troops), True, (10, 10, 10))
             self.screen.blit(troop_text, troop_text.get_rect(center=bubble_center))
             self._draw_territory_label(board_rect, territory_id, str(territory["display_name"]), label_anchor)
-        if hover:
-            info = self._territory(snapshot, hover)
-            text = f"{info['display_name']} | tropas {info['troops']}"
-            hint = self.font_small.render(text, True, TEXT)
-            self.screen.blit(hint, (board_rect.x + 12, board_rect.bottom + 8))
-
     def _territory_at_pos(self, pos: tuple[int, int]) -> str | None:
         if not self.snapshot:
             return None
@@ -814,6 +1084,12 @@ class RiskClientApp:
             if player.get("player_id") == self_player_id:
                 return player
         return None
+
+    def _player_name(self, snapshot: dict[str, object], player_id: str | None) -> str:
+        for player in snapshot.get("players", []):
+            if player.get("player_id") == player_id:
+                return str(player.get("name", "outro jogador"))
+        return "outro jogador"
 
     def _territory_name(self, snapshot: dict[str, object], territory_id: str) -> str:
         if territory_id == "wild":

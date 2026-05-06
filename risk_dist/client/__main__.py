@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from risk_dist.client.ui import ConfiguracaoCliente, main
+from risk_dist.shared.constants import DEFAULT_PORT
 
 
 def _parse_args() -> ConfiguracaoCliente:
     parser = argparse.ArgumentParser(description="Executa o cliente de Risk em pygame.")
     parser.add_argument("--nome", default="Jogador", help="Nome inicial do jogador.")
-    parser.add_argument("--servidor", default="", help="Servidor no formato IP:porta.")
+    parser.add_argument("--servidor", default=f"127.0.0.1:{DEFAULT_PORT}", help="Servidor no formato IP:porta.")
     parser.add_argument("--autoconectar", action="store_true", help="Conecta automaticamente ao abrir.")
     parser.add_argument("--cor", default="", help="Cor preferida para escolher automaticamente no lobby.")
     parser.add_argument("--pronto", action="store_true", help="Marca o jogador como pronto automaticamente.")
